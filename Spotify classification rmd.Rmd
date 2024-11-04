@@ -1,0 +1,449 @@
+---
+title: "Project"
+author: "Bhavya Aggarwal"
+date: "2024-04-19"
+output:
+  word_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+#install.packages("dplyr")
+library(dplyr)
+```
+```{r}
+#install.packages("ggplot2")
+library(ggplot2)
+
+#install.packages("tidyr")
+library(tidyr)
+
+#install.packages("corrplot")
+library(corrplot)
+
+#install.packages("rpart")
+library(rpart)
+
+#install.packages("rpart.plot")
+library(rpart.plot)
+
+#install.packages("randomForest")
+library(randomForest)
+
+#install.packages("xgboost")
+library(xgboost)
+
+library(scales)
+```
+
+```{r}
+songs <- read.csv("C:/Users/bhavy/Documents/Bhavya/IUPUI/Assignments/INFO-H-515/Project/dataset.csv", stringsAsFactors = FALSE)
+
+glimpse(songs)
+```
+
+```{r}
+songs %>% 
+  count(track_genre) %>%
+  knitr::kable()
+```
+
+Exploring Audio Features by 6 selected Genres
+--------------------------------------------
+
+```{r}
+#Selecting data for six track_genres
+
+# Define the genres you want to select
+selected_genres <- c("classical", "rock","r-n-b", "pop", "latin", "edm")
+
+# Filter the data for the selected genres
+filtered_songs <- songs %>%
+  filter(track_genre %in% selected_genres)
+
+# View the filtered data
+glimpse(filtered_songs)
+
+```
+```{r}
+filtered_songs %>% 
+  count(track_genre) %>%
+  knitr::kable()
+```
+
+
+```{r}
+
+# Define feature names
+feature_names <- names(filtered_songs)[c(7:19)[-2]]
+
+feature_names
+```
+
+
+```{r}
+# Data manipulation and plotting
+filtered_songs %>%
+  select(all_of(c('track_genre', feature_names))) %>%
+  pivot_longer(cols = feature_names) %>%
+
+# Create ggplot
+  ggplot(aes(x = value)) +
+  geom_density(aes(color = track_genre), alpha = 0.5) +
+  facet_wrap(~name, ncol = 3, scales = 'free') +
+  labs(title = 'Spotify Audio Feature Density - by Genre',
+       x = '', y = 'density') +
+  theme(axis.text.y = element_blank()) + 
+  scale_color_brewer(palette = 'Set1', limits = c("classical", "rock","r-n-b", "pop", "latin", "edm"))
+```
+
+
+Observation: Overall, the songs in the dataset tend to have low acousticness, liveness, instrumentalness and speechiness, with higher danceability, energy, and loudness. Valence varies across genres.
+
+Breaking things out by genre, EDM tracks are least likely to be acoustic and most likely to have high energy with medium valence (sad or depressed); latin tracks have high valence (are positive or cheerful) and danceability; classical songs score highly for accousicness and low energy; and rock songs have low danceability. Pop, latin and EDM songs are more likely to have shorter durations compared to R&B, rap, and classical.
+
+Based on the density plot, it looks like energy, valence, tempo and danceability may provide the most separation between genres during classification, while instrumentalness and key may not help much.
+
+Removing outliers
+-----------------
+
+There are clearly some outliers in duration that may skew analysis. Using the boxplot function, we can isolate any values that fall outside of a given range. The default range is the interquartile range, or the spread from the 25th to 50th percentile. Because a lot of values fall outside of that range, we can widen it by incrementing the range parameter. Here we've used range = 4, which multiplies the interquartile range by 4 to widen the spread of values we'll consider not be outliers.
+
+```{r}
+with_outliers <- filtered_songs %>%
+  ggplot(aes(y = duration_ms)) +
+  geom_boxplot(color = 'red', coef = 4) +
+  coord_flip() +
+  labs(title = 'Duration') 
+
+duration_outliers <- boxplot(filtered_songs$duration_ms, plot = FALSE, range = 4)$out
+
+songs_no_outliers <- filtered_songs %>%
+  filter(!duration_ms %in% duration_outliers) 
+
+without_outliers <- songs_no_outliers %>%
+  ggplot(aes(y = duration_ms)) +
+  geom_boxplot(color = 'red', coef = 4) +
+  coord_flip() +
+  labs(title = 'Duration, outliers removed') 
+
+gridExtra::grid.arrange(with_outliers, without_outliers, ncol = 1)
+```
+```{r}
+length(duration_outliers)
+```
+
+There were 62 songs that were defined as outliers and removed from the dataset, resulting in a distribution maxing out at 500,000 ms(8.33 minutes) instead of 2,000,000 ms(33.33 minutes).
+
+
+Correlation between features
+-------------------------
+
+How do these features correlate with one another? Are there any that may be redundant?
+
+```{r}
+songs_no_outliers %>%
+  select(feature_names) %>%
+  scale() %>%
+  cor() %>%
+  corrplot::corrplot(method = 'color', 
+                     order = 'hclust', 
+                     type = 'upper', 
+                     diag = FALSE, 
+                     tl.col = 'black',
+                     addCoef.col = "grey30",
+                     number.cex = 0.6,
+                     col = colorRampPalette(colors = c('red',  'white', 'darkblue'))(200),
+                     main = 'Audio Feature Correlation',
+                     mar = c(2,2,2,2))
+```
+Across all songs and genres in the dataset, energy and loudness are fairly highly correlated (0.84). Let's remove loudness, since energy appears to give more distinction between genre groups (as seen in the density plot).
+
+Energy and acousticness are negatively correlated, which makes sense, along with the positive correlation between danceability and valence (happier songs lead to more dancing). Interestingly, danceability is negatively correlated with tempo.
+
+```{r}
+# remove loudness
+feature_names_reduced <- feature_names[-5]
+feature_names_reduced 
+```
+
+Correlation within genres
+-------------------------
+
+How do the genres correlate with each other? We’ll calculate the median feature values for each genre and then compute the correlation between those to find out. This doesn’t take individual song variation into account, but will give us an idea which genres are similar to each other.
+
+```{r}
+# average features by genre
+avg_genre_matrix <- songs_no_outliers %>%
+  group_by(track_genre) %>%
+  summarise_if(is.numeric, median, na.rm = TRUE) %>%
+  ungroup() 
+
+avg_genre_cor <- avg_genre_matrix %>%
+  select(feature_names_reduced, -mode) %>% 
+  scale() %>%
+  t() %>%
+  as.matrix() %>%
+  cor() 
+
+colnames(avg_genre_cor) <- avg_genre_matrix$track_genre
+row.names(avg_genre_cor) <- avg_genre_matrix$track_genre
+
+avg_genre_cor %>% corrplot::corrplot(method = 'color', 
+                     order = 'hclust',
+                     type = 'upper',
+                     tl.col = 'black',
+                     diag = FALSE,
+                     addCoef.col = "grey40",
+                     number.cex = 0.75,
+                     col = colorRampPalette(colors = c('red', 
+                       'white', 'darkblue'))(200),
+                     mar = c(2,2,2,2),
+                     main = 'Correlation Between Median Genre Feature Values')
+```
+Classical is negatively correlated with all genres. EDM and R&B are the most similar, with a positive correlation of 0.33, while Classical and latin and classical and rock are the most different (-0.44, -0.39). Since values are small of correlations, so we can say none of the genres are higly correlated with each other.
+
+Classifying songs into genres using audio features
+--------------------------------------------------
+
+Our first question: is it possible to classify songs into genres with just audio features; our secondary question is what can these audio features tell us about the distinctions between genre. With that aim, we should focus on classification models that are interpretable and provide insight into which features were important in organizing a new song into a given genre.
+
+Classification algorithms that allow for greater interpretation of the features include decision trees, random forests, and gradient boosting.
+
+Preparing the data for training
+-----------------------------
+
+First, we'll scale the numeric features, and then split into a training set (80% of the songs) and a test set (20%).
+
+```{r}
+songs_scaled <- songs_no_outliers %>%
+  mutate_if(is.numeric, scale)
+
+set.seed(1234)
+training_songs <- sample(1:nrow(songs_scaled), nrow(songs_scaled)*.80, replace = FALSE)
+train_set <- songs_scaled[training_songs, c('track_genre', feature_names_reduced)] 
+test_set <- songs_scaled[-training_songs, c('track_genre', feature_names_reduced)] 
+
+train_resp <- songs_scaled[training_songs, 'track_genre']
+test_resp <- songs_scaled[-training_songs, 'track_genre']
+```
+
+Modeling
+------
+
+Decision tree
+-------------
+
+Decision trees are a simple classification tool that have an output that reads like a flow chart, where each node represents a feature, each branch an outcome of a decision on that feature, and the leaves represent the class of the final decision. The algorithm works by partitioning the data into sub-spaces repeatedly in order to create the most homogeneous groups possible. The rules generated by the algorithm are visualized in the tree.
+
+The biggest benefit of decision trees is in interpretability - the resulting tree provides a lot of information about feature importance. They are also non-parametric and make no assumptions about the data. On the flip side, they are prone to overfitting and may produce high variance between models created from different samples of the same data.
+
+```{r}
+set.seed(1111)
+model_dt <- rpart(track_genre ~ ., data = train_set)
+
+rpart.plot(model_dt, 
+           type = 5, 
+           extra = 104,
+           box.palette = list(purple = "#490B32",
+               red = "#9A031E",
+               orange = '#FB8B24',
+               dark_blue = "#0F4C5C",
+               blue = "#5DA9E9",
+               grey = '#66717E'),
+           leaf.round = 0,
+           fallen.leaves = FALSE, 
+           branch = 0.3, 
+           under = TRUE,
+           under.col = 'grey40',
+           main = 'Genre Decision Tree',
+           tweak = 1.2)
+```
+
+The most important feature in the decision tree model is accousticness, separating classical from the rest of the classes on the first decision.
+Next, tracks with high danceability, high energy and of longer duration are classified as EDM while tracks with high danceability, high energy with short dureation are classified as Latin.
+
+Tracks with high danceability, low energy and high valence classified as pop on the other hand with low valence tracks are classified as r-n-b. 
+
+Similarly, trackes with low danceability, low accousticness with shorter duration and shorter valence are classified as EDM while with high valence are classified as rock etc.
+
+The values under the leaves represent the distribution of true values for each class grouped into that leaf; for example, in the classical predicted class, 93% matched the true value, classical, 0% were EDM, 0% were latin, 4% were pop, 1% were R&B, and 2% were rock tracks. The value beneath that indicates the percentage of observations classified into that leaf, so 14% of all tracks were classified as classical in this tree.
+
+The decision tree classifier was best at classifying classical (93% correct) and r-n-b (78% correct) and had the most trouble getting it right for pop tracks (32% correct) in the training data. How does it perform on the hold-out test data?
+
+
+```{r}
+predict_dt <- predict(object = model_dt, newdata = test_set)
+max_id <- apply(predict_dt, 1, which.max)
+pred <- levels(as.factor(test_set$track_genre))[max_id]
+
+compare_dt <- data.frame(true_value = test_set$track_genre,
+                         predicted_value = pred,
+                         model = 'decision_tree',
+                         stringsAsFactors = FALSE)
+
+model_accuracy_calc <- function(df, model_name) {
+  df %>% 
+    mutate(match = ifelse(true_value == predicted_value, TRUE, FALSE)) %>% 
+    count(match) %>% 
+    mutate(accuracy = n/sum(n),
+           model = model_name)
+}
+
+accuracy_dt <- model_accuracy_calc(df = compare_dt, model_name = 'decision_tree')
+accuracy_dt
+```
+The decision tree model shows an overall accuracy, or percentage of songs classified into their correct genre, of 52%.
+
+
+Random forest
+-----------------
+
+Random forests are an ensemble of decision trees, aggregating classifications made by multiple decision trees of different depths. This is also known as bootstrap aggregating (or bagging), and helps avoid overfitting and improves prediction accuracy.
+
+We'll run a random forest model with 100 trees to start, and then take a look at the variable importance.
+
+```{r}
+model_rf <- randomForest(as.factor(track_genre) ~ ., ntree = 100, importance = TRUE, data = train_set)
+
+predict_rf <- predict(model_rf, test_set)
+
+compare_rf <- data.frame(true_value = test_resp,
+                         predicted_value = predict_rf,
+                         model = 'random_forest',
+                         stringsAsFactors = FALSE) 
+
+accuracy_rf <- model_accuracy_calc(df = compare_rf, model_name = 'random_forest')
+accuracy_rf
+```
+The random forest model shows overall accuracy of 70%.
+
+Gradient boosting with XGBoost
+-----------------------------
+
+The next round of improvements to the random forest model come from boosting, or building models sequentially, minimizing errors and boosting the influence of the most successful models. Adding in the gradient descent algorithm for minimizing errors results in a gradient boosting model. Here, we'll use XGBoost, which provides parallel processing to decrease compute time as well as various other improvements.
+
+We'll use the xgboost function with most of the default hyperparameter settings, just setting objective to handle multiclass classification.
+
+```{r}
+matrix_train_gb <- xgb.DMatrix(data = as.matrix(train_set[,-1]), label = as.integer(as.factor(train_set[,1])))
+matrix_test_gb <- xgb.DMatrix(data = as.matrix(test_set[,-1]), label = as.integer(as.factor(test_set[,1])))
+
+model_gb <- xgboost(data = matrix_train_gb, 
+                    nrounds = 50,
+                    verbose = FALSE,
+                    params = list(objective = "multi:softmax",
+                                  num_class = 6 + 1))
+
+predict_gb <- predict(model_gb, matrix_test_gb)
+predict_gb <- levels(as.factor(test_set$track_genre))[predict_gb]
+
+compare_gb <- data.frame(true_value = test_resp,
+                         predicted_value = predict_gb,
+                         model = 'xgboost',
+                         stringsAsFactors = FALSE) 
+
+accuracy_gb <- model_accuracy_calc(df = compare_gb, model_name = 'xgboost')
+accuracy_gb
+```
+
+The gradient boosting model shows overall accuracy of 70%.
+
+Model comparison
+--------------
+
+Variable importance
+--------------------
+
+```{r}
+importance_dt <- data.frame(importance = model_dt$variable.importance)
+importance_dt$feature <- row.names(importance_dt)
+
+# mean decrease in impurity
+importance_rf <- data.frame(importance = importance(model_rf, type = 2))
+importance_rf$feature <- row.names(importance_rf)
+
+# gain
+importance_gb <- xgb.importance(model = model_gb)
+
+compare_importance <- importance_gb %>%
+  select(Feature, Gain) %>%
+  left_join(importance_dt, by = c('Feature' = 'feature')) %>%
+  left_join(importance_rf, by = c('Feature' = 'feature')) %>%
+  rename('xgboost' = 'Gain',
+         'decision_tree' = 'importance',
+         'random_forest' = 'MeanDecreaseGini') 
+
+compare_importance %>%
+  mutate_if(is.numeric, scale, center = TRUE) %>%
+  pivot_longer(cols = c('xgboost', 'decision_tree', 'random_forest')) %>%
+  rename('model' = 'name') %>%
+  ggplot(aes(x = reorder(Feature, value, mean, na.rm = TRUE), y = value, color = model)) + 
+  geom_point(size = 2) + 
+  coord_flip() +
+  labs(title = 'Variable Importance by Model',
+       subtitle = 'Scaled for comparison',
+       y = 'Scaled value', x = '') +
+  scale_color_brewer(palette = 'Set1')
+```
+Each model uses a different measure for explaining variable importance. Decision trees provide a score for each feature based on its usefulness in splitting the data. For a random forest, we can use mean decrease in node impurity, which is the average decrease in node impurity/increase in node purity resulting from a split on a given feature. For XGBoost, we can use gain, or the improvement in accuracy contributed by a given feature. For all features, the top-ranked feature is typically the most common root node in the tree(s) as they tend to create the biggest reduction in impurity.
+
+For all the three models, accousticness was the most important variable. Danceability, energy, duration, and instrumentalness were also found to be important features for separating songs into genres, while mode and key didn't contribute much.
+
+Accuracy
+-----------
+
+```{r}
+accuracy_rf %>%
+  rbind(accuracy_dt) %>%
+  rbind(accuracy_gb) %>%
+  filter(match == TRUE) %>%
+  select(model, accuracy) %>%
+  mutate(accuracy = percent(accuracy,2)) %>%
+  knitr::kable()
+```
+
+If we guessed randomly which genre to assign to each song in this dataset, the accuracy would be 16.6% (or 1 in 6). The decision tree improved on random chance twofold, and random forest and XGBoost improved it more than threefold, though none would be very reliable in practice.
+
+Classifying fewer genres would likely improve this metric, and trying to classify more than 6 would likely drive it down further. It's unlikely that this approach is a robust way to classify music in real life, where Spotify handles thousands of different genres and subgenres.
+
+How did each model fare for each genre?
+
+```{r}
+compare_dt %>%
+  rbind(compare_rf) %>%
+  rbind(compare_gb) %>%
+  count(true_value, predicted_value, model) %>%
+  mutate(match = ifelse(true_value == predicted_value, TRUE, FALSE)) %>%
+  group_by(true_value, model) %>%
+  mutate(pct = n/sum(n)) %>% 
+  ungroup() %>%
+  mutate(label = ifelse(match == TRUE, 
+                        paste0(round(pct * 100,1),'%'), 
+                        "")) %>%
+  ggplot(aes(x = true_value, 
+             y = pct, 
+             fill = predicted_value, 
+             label = label)) +
+  geom_col(position = 'dodge') +
+  geom_text(position = position_dodge(width = 1), 
+            cex = 2.75, 
+            hjust = -0.1) +
+  facet_wrap( ~ model, ncol = 3) +
+  coord_flip() + 
+  labs(title = 'Genre Accuracy by Model',
+       subtitle = 'Accuracy denoted as a percent label',
+       y = 'Percent classified') +
+  ylim(c(0,.85)) +
+  theme(panel.grid.major.y = element_blank()) +
+  scale_fill_brewer() 
+```
+
+All genres except classical showed gains in accuracy as we moved from simpler to more complex (decision tree –> random forest/XGBoost), though XGBoost didn’t provide improvements for most genres.
+
+Pop and R&B remained the most difficult to classify, while EDM, latin and rock reached more than 65% accuracy.
+
