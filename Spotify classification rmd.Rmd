@@ -1,6 +1,6 @@
 ---
 title: "Project"
-author: "Bhavya Aggarwal"
+
 date: "2024-04-19"
 output:
   word_document: default
