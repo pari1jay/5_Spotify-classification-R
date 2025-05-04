@@ -12,9 +12,9 @@ Automatic genre classification has long captivated researchers in Music Informat
 5. Variable Importance Analysis
 
 ## Results: MODEL ACCURACY
-RANDOM_FOREST 70%
-DECISION_TREE 52%
-XGBOOST 70%
+- RANDOM_FOREST 70%
+- DECISION_TREE 52%
+- XGBOOST 70%
 
 ## Inference:
 - The feature"acousticness" seems to have the higher importance for the decision_tree model, while it has relatively lower importance for the random_forest and xgboost models.
