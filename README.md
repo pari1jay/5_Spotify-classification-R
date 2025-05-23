@@ -1,4 +1,4 @@
-#**MULTI-CLASS GENRE CLASSIFICATION**
+# **MULTI-CLASS GENRE CLASSIFICATION**
 Automatic genre classification has long captivated researchers in Music Information Retrieval (MIR), seeking techniques to unravel the complex tapestry of musical diversity. We aim to delve into the intricacies of audio feature extraction and music genre classification by utilizing Spotify's rich array of audio features and a diverse dataset.
 
 - Objective1 : is it possible to classify songs into genres with just audio features
