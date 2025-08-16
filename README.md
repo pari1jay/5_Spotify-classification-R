@@ -16,14 +16,14 @@ Automatic genre classification has long captivated researchers in Music Informat
 - DECISION_TREE 52%
 - XGBOOST 70%
 
-## Inference:
+## Inference :
 - The feature"acousticness" seems to have the higher importance for the decision_tree model, while it has relatively lower importance for the random_forest and xgboost models.
 - The feature "energy" appears to be moderately important for the random_forest and xgboost models but has lower importance for the decision_tree model.
 
-## Genre Accuracy:
+## Genre Accuracy :
 - Random Forest has the highest accuracy of 78.5% in classifying ‘edm’ genre, which is a bit higher compared to decision tree and xgboost models.
 - Xgboost model has the highest accuracy among all models of 50.3% in classifying ‘pop’ genre.
 
-## Future:
+## Future :
 • Investigate more advanced ensemble techniques by using stacking or blending strategies to further improve classification accuracy.
 • Leveraging pre-trained models or transfer learning approaches
